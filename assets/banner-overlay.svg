@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1376" height="768" viewBox="0 0 1376 768">
+  <!--
+    透明叠加层，尺寸与 banner-base.png (1376x768) 严格一致，避免合成时非等比拉伸。
+    与底图合成后得到 assets/banner.png。文字为矢量渲染，不会出现 AI 生图的错字/畸变。
+
+    排版结构（单行标题 lockup）：
+      图标 | 竖分隔线 | 眉标 / 主标题 / 包名
+    三行文字左边界统一为 x=258，图标与文字块共享垂直中心 y≈570。
+  -->
+  <defs>
+    <!-- 底部渐变遮罩：压暗插画下缘，为标题提供稳定对比度，同时柔化底图横向接缝 -->
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#0B1220" stop-opacity="0"/>
+      <stop offset="38%"  stop-color="#0B1220" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#0B1220" stop-opacity="0.99"/>
+    </linearGradient>
+
+    <!-- 品牌渐变：青 → 腾讯云蓝 → 紫 -->
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#4FD1FF"/>
+      <stop offset="55%"  stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#A78BFA"/>
+    </linearGradient>
+
+    <!-- 竖分隔线：两端渐隐，避免生硬截断 -->
+    <linearGradient id="rule" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#3B82F6" stop-opacity="0"/>
+      <stop offset="50%"  stop-color="#6BA5F9" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#3B82F6" stop-opacity="0"/>
+    </linearGradient>
+
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect x="0" y="358" width="1376" height="410" fill="url(#fade)"/>
+
+  <!-- 原创抽象标记：采集节点 → 汇聚上报，非任何第三方 logo -->
+  <g transform="translate(104,522)" filter="url(#glow)">
+    <rect x="0" y="0" width="96" height="96" rx="24"
+          fill="#0B1220" fill-opacity="0.55"
+          stroke="url(#brand)" stroke-width="2.8"/>
+    <path d="M26 67 L48 31 L70 58" fill="none" stroke="url(#brand)"
+          stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="26" cy="67" r="6.4" fill="#4FD1FF"/>
+    <circle cx="48" cy="31" r="6.4" fill="#A78BFA"/>
+    <circle cx="70" cy="58" r="6.4" fill="#3B82F6"/>
+  </g>
+
+  <rect x="228" y="506" width="1.8" height="128" fill="url(#rule)"/>
+
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+    <!-- 眉标：不复用标题中的 Observability，避免语义重复 -->
+    <text x="260" y="526" font-size="17" font-weight="600"
+          letter-spacing="4.6" fill="#7C97BE">TENCENT CLOUD · AGENT</text>
+
+    <!-- 主标题单行：品牌名用 tspan 局部渐变着色 -->
+    <text x="258" y="584" font-size="46" font-weight="700"
+          letter-spacing="-0.7" fill="#F3F7FF">Observability for <tspan fill="url(#brand)">DeepSeek Harness</tspan></text>
+
+    <text x="260" y="624" font-size="17.5" letter-spacing="0.4" fill="#78899F"
+          font-family="SF Mono, Menlo, Consolas, monospace">tencentcloud-agentobs-sdk-dsh</text>
+  </g>
+</svg>
