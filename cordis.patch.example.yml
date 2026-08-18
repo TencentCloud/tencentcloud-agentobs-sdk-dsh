@@ -1,0 +1,30 @@
+# tencentcloud-agentobs-sdk-dsh 配置示例
+# 将以下内容添加到 ~/.dsh/profiles/<profile>/cordis.patch.yml
+#
+# 最小配置（也可以全部用环境变量代替）:
+- id: cls-observability
+  config:
+    endpoint: ap-guangzhou.cls.tencentcs.com
+    topicId: your-topic-id-here
+    secretId: your-secret-id-here
+    secretKey: your-secret-key-here
+
+# 完整配置（带所有可选项）:
+# - id: cls-observability
+#   config:
+#     enabled: true
+#     endpoint: ap-guangzhou.cls.tencentcs.com
+#     topicId: your-topic-id-here
+#     secretId: your-secret-id-here
+#     secretKey: your-secret-key-here
+#     serviceName: my-dsh-agent
+#     captureContent: true
+#     contentMaxChars: 128000
+#     batchMaxSize: 32
+#     maxQueueSize: 2048
+#     flushIntervalMs: 5000
+#     retryTimes: 3
+#     debug: false
+#     resourceAttributes:
+#       deployment.environment: production
+#       team.name: ai-platform

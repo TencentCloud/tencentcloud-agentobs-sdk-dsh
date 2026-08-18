@@ -1,0 +1,5 @@
+# CLS observability for DeepSeek Harness. Uploads GenAI traces directly to
+# Tencent Cloud CLS without requiring an OTLP collector or sidecar.
+- insert:
+    - id: cls-observability
+      name: 'tencentcloud-agentobs-sdk-dsh'

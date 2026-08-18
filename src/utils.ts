@@ -1,0 +1,61 @@
+import { randomBytes } from 'node:crypto'
+import { hostname } from 'node:os'
+import { networkInterfaces } from 'node:os'
+
+/** Generate 32-char hex trace ID. */
+export function newTraceId(): string {
+  return randomBytes(16).toString('hex')
+}
+
+/** Generate 16-char hex span ID. */
+export function newSpanId(): string {
+  return randomBytes(8).toString('hex')
+}
+
+/** Convert millisecond epoch to nanosecond epoch string. */
+export function msToNanoStr(ms: number): string {
+  return String(BigInt(Math.max(0, Math.round(ms))) * 1_000_000n)
+}
+
+/** Calculate duration in nanoseconds between two ms timestamps. */
+export function durationNanoStr(startMs: number, endMs: number): string {
+  const diff = Math.max(0, endMs - startMs)
+  return String(BigInt(Math.round(diff)) * 1_000_000n)
+}
+
+/** Calculate duration in milliseconds. */
+export function durationMs(startMs: number, endMs: number): number {
+  return Math.max(0, Math.round(endMs - startMs))
+}
+
+/** Get local IP address. */
+export function getLocalIp(): string {
+  const interfaces = networkInterfaces()
+  for (const name of Object.keys(interfaces)) {
+    const iface = interfaces[name]
+    if (!iface) continue
+    for (const entry of iface) {
+      if (entry.family === 'IPv4' && !entry.internal) {
+        return entry.address
+      }
+    }
+  }
+  return hostname()
+}
+
+/** Safe JSON stringify. */
+export function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 0)
+  } catch {
+    return String(value)
+  }
+}
+
+/** Convert any value to string for CLS attribute. */
+export function toAttrString(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return safeStringify(value)
+}
