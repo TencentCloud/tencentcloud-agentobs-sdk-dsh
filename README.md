@@ -1,10 +1,14 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/TencentCloud/tencentcloud-agentobs-sdk-dsh/main/assets/banner.png" alt="Tencent Cloud CLS observability for DeepSeek Harness" width="820">
+</p>
+
 # Tencent Cloud Service CLS observability for DeepSeek Harness
 
 [English](./README.en.md) | 简体中文
 
 `tencentcloud-agentobs-sdk-dsh` 是一个 DeepSeek Harness (DSH) 可观测插件，直接将 GenAI trace 数据上报到腾讯云日志服务 (CLS)。
 
-它观察 DSH 原生的 session、agent loop、LLM stream 和 tool 生命周期，将其转换为 CLS 规范的 5 层 span 层级模型（entry → agent → step → chat → tool），并通过 `tencentcloud-cls-sdk-js` 直接上报到 CLS，**无需额外部署 OTLP 收集器或 sidecar**。
+它观察 DSH 原生的 session、agent loop、LLM stream 和 tool 生命周期，将其转换为腾讯云AI Agent可观测规范的 5 层 span 层级模型（entry → agent → step → chat → tool），并通过 `tencentcloud-cls-sdk-js` 直接上报到 CLS，**无需额外部署 OTLP 收集器或 sidecar**。
 
 ## 数据模型
 
