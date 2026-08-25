@@ -55,6 +55,8 @@ interface LlmState {
   ended: boolean
   firstTokenSeen: boolean
   firstTokenMono?: number
+  /** Index into options.messages marking the start of new (non-history) messages for this turn. */
+  newMessagesOffset: number
 }
 
 interface StepState {
@@ -446,6 +448,25 @@ export class DshClsCoordinator {
     if (session === undefined || turn === undefined || step === undefined) return undefined
 
     const attempt = step.nextAttempt++
+
+    // Calculate the offset for new messages in this turn.
+    // Messages before this offset are conversation history from previous turns.
+    // For attempt > 1 (retry in the same step), all messages are relevant.
+    // For the first attempt, messages added during this turn start after the history baseline.
+    // Heuristic: messages whose source.kind is 'user' at the tail are this turn's input.
+    const messages = options.messages
+    let newMessagesOffset = 0
+    if (attempt === 1 && messages.length > 0) {
+      // Find the last user message — everything from there onward is this turn's new input
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i]
+        if (msg && msg.role === 'user') {
+          newMessagesOffset = i
+          break
+        }
+      }
+    }
+
     const llm: LlmState = {
       spanId: newSpanId(),
       attempt,
@@ -455,6 +476,7 @@ export class DshClsCoordinator {
       startMono: performance.now(),
       ended: false,
       firstTokenSeen: false,
+      newMessagesOffset,
     }
     step.llms.add(llm)
     turn.model = options.model
@@ -935,9 +957,10 @@ export class DshClsCoordinator {
     attrs['dsh.llm.attempt'] = llm.attempt
     attrs['dsh.step'] = step?.step ?? 0
 
-    // Content capture
+    // Content capture — only report messages from this turn (not full history)
     if (this.config.captureContent) {
-      const inputMsgs = mapInputMessages(llm.options.messages)
+      const currentTurnMessages = llm.options.messages.slice(llm.newMessagesOffset)
+      const inputMsgs = mapInputMessages(currentTurnMessages)
       attrs['gen_ai.input.messages'] = truncate(safeStringify(inputMsgs), this.config.contentMaxChars)
 
       if (llm.blocks.length > 0) {
