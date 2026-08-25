@@ -1,6 +1,6 @@
 {
   "name": "tencentcloud-agentobs-sdk-dsh",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Tencent Cloud Service CLS observability plugin for DeepSeek Harness — direct upload to Tencent Cloud CLS",
   "type": "module",
   "main": "./dist/index.js",
@@ -57,7 +57,7 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.1",
-    "tencentcloud-cls-sdk-js": "^1.0.6"
+    "tencentcloud-cls-sdk-js": "^1.1.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",

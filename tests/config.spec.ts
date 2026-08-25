@@ -62,6 +62,54 @@ describe('resolveClsConfig', () => {
     }
   })
 
+  it('resolves authless (weak auth) config when uin is provided and secrets are absent', () => {
+    delete process.env['CLS_SECRET_ID']
+    delete process.env['CLS_SECRET_KEY']
+    delete process.env['CLS_UIN']
+    const config = testConfig({ secretId: '', secretKey: '', uin: '100000000000' })
+    const resolved = resolveClsConfig(config)
+    expect('missing' in resolved).toBe(false)
+    if (!('missing' in resolved)) {
+      expect(resolved.secretId).toBe('')
+      expect(resolved.secretKey).toBe('')
+      expect(resolved.uin).toBe('100000000000')
+    }
+  })
+
+  it('resolves uin from environment variables', () => {
+    process.env['CLS_UIN'] = '100000000000'
+    const config = testConfig({ secretId: '', secretKey: '', uin: '' })
+    const resolved = resolveClsConfig(config)
+    expect('missing' in resolved).toBe(false)
+    if (!('missing' in resolved)) {
+      expect(resolved.uin).toBe('100000000000')
+    }
+    delete process.env['CLS_UIN']
+  })
+
+  it('reports missing auth when neither strong nor weak credentials are present', () => {
+    delete process.env['CLS_SECRET_ID']
+    delete process.env['CLS_SECRET_KEY']
+    delete process.env['CLS_UIN']
+    const config = testConfig({ secretId: '', secretKey: '', uin: '' })
+    const result = resolveClsConfig(config)
+    expect('missing' in result).toBe(true)
+    if ('missing' in result) {
+      expect(result.missing).toContain('CLS_SECRET_ID + CLS_SECRET_KEY (or CLS_UIN)')
+    }
+  })
+
+  it('reports invalid uin when it is not digits-only', () => {
+    delete process.env['CLS_SECRET_ID']
+    delete process.env['CLS_SECRET_KEY']
+    const config = testConfig({ secretId: '', secretKey: '', uin: 'not-a-number' })
+    const result = resolveClsConfig(config)
+    expect('missing' in result).toBe(true)
+    if ('missing' in result) {
+      expect(result.missing).toContain('CLS_UIN (must be a digits-only string)')
+    }
+  })
+
   it('falls back to environment variables', () => {
     process.env['CLS_ENDPOINT'] = 'ap-shanghai.cls.tencentcs.com'
     process.env['CLS_TOPIC_ID'] = 'env-topic'

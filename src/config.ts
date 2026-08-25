@@ -12,6 +12,8 @@ export interface Config {
   secretId?: string
   /** Tencent Cloud SecretKey. */
   secretKey?: string
+  /** Tencent Cloud UIN (digits only) for authless (weak auth) upload. Mutually exclusive with secretId/secretKey. */
+  uin?: string
   /** Service name for CLS resource identification. */
   serviceName?: string
   /** Additional string-valued resource attributes injected into every span. */
@@ -39,6 +41,7 @@ export const Config: z<Config> = z.object({
   topicId: z.string(),
   secretId: z.string(),
   secretKey: z.string(),
+  uin: z.string(),
   serviceName: z.string(),
   resourceAttributes: z.dict(z.string()).default({}),
   captureContent: z.boolean(),
@@ -74,6 +77,7 @@ export interface ResolvedClsConfig {
   topicId: string
   secretId: string
   secretKey: string
+  uin: string
   serviceName: string
   resourceAttributes: Record<string, string>
   captureContent: boolean
@@ -110,17 +114,28 @@ export function resolveClsConfig(config: Config): ResolveResult {
   const topicId = config.topicId || process.env['CLS_TOPIC_ID'] || ''
   const secretId = config.secretId || process.env['CLS_SECRET_ID'] || ''
   const secretKey = config.secretKey || process.env['CLS_SECRET_KEY'] || ''
+  const uin = config.uin || process.env['CLS_UIN'] || ''
   const serviceName = config.serviceName
     || process.env['CLS_SERVICE_NAME']
     || process.env['OTEL_SERVICE_NAME']
     || 'deepseek-harness'
 
-  if (!endpoint || !topicId || !secretId || !secretKey) {
+  // Strong auth requires both secretId and secretKey; weak (authless) auth
+  // requires a digits-only UIN. The two are mutually exclusive.
+  const hasStrongAuth = secretId !== '' && secretKey !== ''
+  const hasWeakAuth = uin !== '' && /^\d+$/.test(uin)
+
+  if (!endpoint || !topicId || (!hasStrongAuth && !hasWeakAuth)) {
     const missing: string[] = []
     if (!endpoint) missing.push('CLS_ENDPOINT')
     if (!topicId) missing.push('CLS_TOPIC_ID')
-    if (!secretId) missing.push('CLS_SECRET_ID')
-    if (!secretKey) missing.push('CLS_SECRET_KEY')
+    if (!hasStrongAuth && !hasWeakAuth) {
+      if (uin !== '') {
+        missing.push('CLS_UIN (must be a digits-only string)')
+      } else {
+        missing.push('CLS_SECRET_ID + CLS_SECRET_KEY (or CLS_UIN)')
+      }
+    }
     return { missing }
   }
 
@@ -133,6 +148,7 @@ export function resolveClsConfig(config: Config): ResolveResult {
     topicId,
     secretId,
     secretKey,
+    uin,
     serviceName,
     resourceAttributes,
     captureContent: resolveCaptureContent(config.captureContent),

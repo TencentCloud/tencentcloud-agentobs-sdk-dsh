@@ -94,9 +94,14 @@ dsh plugin --profile harness remove tencentcloud-agentobs-sdk-dsh
 ```sh
 export CLS_ENDPOINT=ap-guangzhou.cls.tencentcs.com
 export CLS_TOPIC_ID=your-topic-id
+export CLS_SERVICE_NAME=dsh-agent
+
+# 鉴权方式二选一：
+# 方式 1（强鉴权）：SecretId + SecretKey
 export CLS_SECRET_ID=your-secret-id
 export CLS_SECRET_KEY=your-secret-key
-export CLS_SERVICE_NAME=dsh-agent
+# 方式 2（免鉴权/弱鉴权）：仅提供纯数字 UIN
+# export CLS_UIN=your-uin
 
 dsh --profile web
 ```
@@ -110,8 +115,11 @@ dsh --profile web
   config:
     endpoint: ap-guangzhou.cls.tencentcs.com
     topicId: your-topic-id
+    # 强鉴权：SecretId + SecretKey
     secretId: your-secret-id
     secretKey: your-secret-key
+    # 或免鉴权（弱鉴权）：仅提供纯数字 UIN（与 SecretId/SecretKey 二选一）
+    # uin: "100000000000"
     serviceName: dsh-agent
     captureContent: true
     batchMaxSize: 32
@@ -139,8 +147,9 @@ dsh --profile web
 | `enabled` | `true` | 禁用采集但不卸载插件 |
 | `endpoint` | `CLS_ENDPOINT` | CLS API 接入点 |
 | `topicId` | `CLS_TOPIC_ID` | CLS 日志主题 ID |
-| `secretId` | `CLS_SECRET_ID` | 腾讯云 SecretId |
-| `secretKey` | `CLS_SECRET_KEY` | 腾讯云 SecretKey |
+| `secretId` | `CLS_SECRET_ID` | 腾讯云 SecretId（强鉴权，与 `uin` 二选一） |
+| `secretKey` | `CLS_SECRET_KEY` | 腾讯云 SecretKey（强鉴权，与 `uin` 二选一） |
+| `uin` | `CLS_UIN` | 免鉴权（弱鉴权）上报的腾讯云 UIN（纯数字，与 SecretId/SecretKey 二选一） |
 | `serviceName` | `deepseek-harness` | 服务名 |
 | `captureContent` | `true` | 捕获 prompts/responses/tool 内容（设为 `false` 关闭） |
 | `contentMaxChars` | `128000` | 单个内容属性最大字符数 |

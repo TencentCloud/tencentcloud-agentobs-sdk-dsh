@@ -10,8 +10,11 @@ import type { CLSSpan } from './cls-types.js'
 import type { ResolvedClsConfig } from './config.js'
 import type { DshLogger } from './dsh-types.js'
 import { getLocalIp, toAttrString } from './utils.js'
+import { VERSION } from './version.js'
 
 const require = createRequire(import.meta.url)
+
+const DEFAULT_USER_AGENT = `agentobs-dsh-${VERSION}`
 
 // tencentcloud-cls-sdk-js uses CJS exports
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -36,7 +39,6 @@ interface ClsLogGroup {
 }
 interface ClsPutLogsRequest { topicId: string }
 
-const MAX_CONTENT_LENGTH = 32 * 1024
 const MAX_BATCH_BYTES = 900 * 1024
 
 export class CLSFlusher {
@@ -62,6 +64,8 @@ export class CLSFlusher {
       endpoint,
       secretId: this.config.secretId,
       secretKey: this.config.secretKey,
+      uin: this.config.uin,
+      user_agent: DEFAULT_USER_AGENT,
       sourceIp: getLocalIp(),
       retry_times: this.config.retryTimes,
     })
@@ -199,11 +203,7 @@ export class CLSFlusher {
       ]
 
       for (const [key, value] of entries) {
-        let v = value
-        if (v.length > MAX_CONTENT_LENGTH) {
-          v = v.slice(0, MAX_CONTENT_LENGTH) + '...[truncated]'
-        }
-        item.pushBack(new Content(key, v))
+        item.pushBack(new Content(key, value))
       }
 
       // Timestamp in seconds

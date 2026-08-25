@@ -39,15 +39,20 @@ export function apply(ctx: Context, config: Config): void {
       + '  Option 1: Set environment variables:\n'
       + '    export CLS_ENDPOINT=ap-guangzhou.cls.tencentcs.com\n'
       + '    export CLS_TOPIC_ID=<your-topic-id>\n'
+      + '    # strong auth:\n'
       + '    export CLS_SECRET_ID=<your-secret-id>\n'
       + '    export CLS_SECRET_KEY=<your-secret-key>\n'
+      + '    # or authless (weak auth) upload:\n'
+      + '    export CLS_UIN=<your-uin>\n'
       + '  Option 2: Edit plugin config at ~/.dsh/profiles/<profile>/cordis.patch.yml:\n'
       + '    - id: cls-observability\n'
       + '      config:\n'
       + '        endpoint: ap-guangzhou.cls.tencentcs.com\n'
       + '        topicId: <your-topic-id>\n'
       + '        secretId: <your-secret-id>\n'
-      + '        secretKey: <your-secret-key>',
+      + '        secretKey: <your-secret-key>\n'
+      + '        # or authless (weak auth) upload:\n'
+      + '        # uin: <your-uin>',
     )
     return
   }
