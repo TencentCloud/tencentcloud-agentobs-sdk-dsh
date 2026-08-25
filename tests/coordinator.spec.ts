@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DshClsCoordinator } from '../src/coordinator.js'
 import type { CLSSpan } from '../src/cls-types.js'
+import type { DshMessage } from '../src/dsh-types.js'
 import {
   collect,
   event,
@@ -49,7 +50,13 @@ describe('DshClsCoordinator', () => {
     const started = Date.now() - 1_000
     coordinator.adoptSession(current)
     coordinator.onSessionEvent(current, event('turn/start', { turn: 1 }, 0, started))
-    coordinator.onSessionEvent(current, event('step/start', { turn: 1, step: 1 }, 1, started + 10))
+    coordinator.onSessionEvent(current, event(
+      'user/message',
+      message('user-1', 'user', [{ type: 'text', text: 'Hello from DSH' }], { kind: 'user' }),
+      1,
+      started + 5,
+    ))
+    coordinator.onSessionEvent(current, event('step/start', { turn: 1, step: 1 }, 2, started + 10))
 
     await collect(coordinator.interceptLlm(llmOptions(), successfulStream))
 
@@ -211,6 +218,237 @@ describe('DshClsCoordinator', () => {
     const agent = spans.find(s => s.spanKind === 'agent')
     expect(agent).toBeDefined()
     expect(agent!.statusCode).toBe('ERROR')
+
+    await coordinator.shutdown()
+  })
+
+  it('keeps injected context out of ENTRY and AGENT but in the CHAT request', async () => {
+    const coordinator = createCoordinator({ captureContent: true })
+    const current = session('inject-session')
+    const started = Date.now() - 200
+    coordinator.adoptSession(current)
+    coordinator.onSessionEvent(current, event('turn/start', { turn: 1 }, 0, started))
+
+    // DSH emits synthetic model-visible context as user/message too — only
+    // source.kind distinguishes it from the human's own request.
+    const injected: Array<[string, DshMessage['source'], string]> = [
+      ['user-direct', { kind: 'user' }, 'direct user prompt'],
+      ['runtime-context', { kind: 'plugin', plugin: 'runtime-context', form: 'snapshot' }, 'injected runtime context'],
+      ['skill-catalog', { kind: 'skill-catalog', form: 'catalog' }, 'injected skill catalog'],
+      ['goal-round', { kind: 'goal', goalId: 'goal-1', round: 1 }, 'automatic goal continuation'],
+      ['coordinator-relay', { kind: 'coordinator', form: 'relay' }, 'coordinator follow-up'],
+      ['user-steering', { kind: 'user', rpcId: 'rpc-1' }, 'direct user steering'],
+    ]
+    injected.forEach(([id, source, text], index) => {
+      coordinator.onSessionEvent(current, event(
+        'user/message',
+        message(id, 'user', [{ type: 'text', text }], source),
+        index + 1,
+        started + index + 1,
+      ))
+    })
+
+    coordinator.onSessionEvent(current, event('step/start', { turn: 1, step: 1 }, 7, started + 10))
+    await collect(coordinator.interceptLlm(llmOptions('inject-session'), successfulStream))
+    coordinator.onSessionEvent(current, event('step/end', { turn: 1, step: 1 }, 8, Date.now()))
+    coordinator.onSessionEvent(current, event(
+      'turn/end',
+      { turn: 1, reason: { kind: 'completed' } },
+      9,
+      Date.now(),
+    ))
+
+    const spans = getEnqueuedSpans(coordinator)
+    const entry = spans.find(s => s.spanKind === 'entry')!
+    const agent = spans.find(s => s.spanKind === 'agent')!
+    const chat = spans.find(s => s.spanKind === 'chat')!
+
+    // ENTRY/AGENT expose only the two direct user inputs
+    for (const span of [entry, agent]) {
+      const inputs = JSON.parse(span.attribute['gen_ai.input.messages'] as string)
+      expect(inputs).toHaveLength(2)
+      expect(JSON.stringify(inputs)).toContain('direct user prompt')
+      expect(JSON.stringify(inputs)).toContain('direct user steering')
+      expect(JSON.stringify(inputs)).not.toContain('injected runtime context')
+      expect(JSON.stringify(inputs)).not.toContain('injected skill catalog')
+    }
+
+    // CHAT retains the full model-visible request for this turn
+    const chatInputs = JSON.parse(chat.attribute['gen_ai.input.messages'] as string)
+    expect(chatInputs).toHaveLength(6)
+    const chatRaw = chat.attribute['gen_ai.input.messages'] as string
+    expect(chatRaw).toContain('injected runtime context')
+    expect(chatRaw).toContain('injected skill catalog')
+    expect(chatRaw).toContain('automatic goal continuation')
+    expect(chatRaw).toContain('coordinator follow-up')
+
+    await coordinator.shutdown()
+  })
+
+  it('scopes CHAT input to the current turn and keeps same-turn tool context', async () => {
+    const coordinator = createCoordinator({ captureContent: true })
+    const current = session('scope-session')
+    const base = Date.now() - 500
+
+    coordinator.adoptSession(current)
+
+    // ── Turn 1 ──
+    coordinator.onSessionEvent(current, event('turn/start', { turn: 1 }, 0, base))
+    coordinator.onSessionEvent(current, event(
+      'user/message',
+      message('u1', 'user', [{ type: 'text', text: 'first turn question' }], { kind: 'user' }),
+      1,
+      base + 1,
+    ))
+    coordinator.onSessionEvent(current, event('step/start', { turn: 1, step: 1 }, 2, base + 2))
+    await collect(coordinator.interceptLlm(llmOptions('scope-session'), successfulStream))
+    coordinator.onSessionEvent(current, event('step/end', { turn: 1, step: 1 }, 3, base + 3))
+    coordinator.onSessionEvent(current, event(
+      'turn/end',
+      { turn: 1, reason: { kind: 'completed' } },
+      4,
+      base + 4,
+    ))
+
+    // ── Turn 2: a tool loop across two steps ──
+    coordinator.onSessionEvent(current, event('turn/start', { turn: 2 }, 5, base + 10))
+    coordinator.onSessionEvent(current, event(
+      'user/message',
+      message('u2', 'user', [{ type: 'text', text: 'second turn question' }], { kind: 'user' }),
+      6,
+      base + 11,
+    ))
+    coordinator.onSessionEvent(current, event('step/start', { turn: 2, step: 1 }, 7, base + 12))
+    await collect(coordinator.interceptLlm(llmOptions('scope-session'), successfulStream))
+    coordinator.onSessionEvent(current, event(
+      'assistant/message',
+      {
+        turn: 2,
+        step: 1,
+        message: message(
+          'a1',
+          'assistant',
+          [{ type: 'tool-call', id: 'c1', name: 'read_file', arguments: '{"path":"b.txt"}' }],
+          { kind: 'assistant' },
+        ),
+      },
+      8,
+      base + 13,
+    ))
+    coordinator.onSessionEvent(current, event(
+      'tool/result',
+      {
+        turn: 2,
+        step: 1,
+        message: message(
+          't1',
+          'user',
+          [{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: 'tool payload' }] }],
+          { kind: 'tool', callId: 'c1' },
+        ),
+      },
+      9,
+      base + 14,
+    ))
+    coordinator.onSessionEvent(current, event('step/end', { turn: 2, step: 1 }, 10, base + 15))
+
+    // Second step of the same turn — its CHAT span must retain the tool context
+    coordinator.onSessionEvent(current, event('step/start', { turn: 2, step: 2 }, 11, base + 16))
+    await collect(coordinator.interceptLlm(llmOptions('scope-session'), successfulStream))
+    coordinator.onSessionEvent(current, event('step/end', { turn: 2, step: 2 }, 12, base + 17))
+    coordinator.onSessionEvent(current, event(
+      'turn/end',
+      { turn: 2, reason: { kind: 'completed' } },
+      13,
+      base + 18,
+    ))
+
+    const chats = getEnqueuedSpans(coordinator).filter(s => s.spanKind === 'chat')
+    expect(chats).toHaveLength(3)
+    const [turn1Chat, turn2Step1Chat, turn2Step2Chat] = chats as [CLSSpan, CLSSpan, CLSSpan]
+
+    // Each trace covers one turn — turn 2 never repeats turn 1's history
+    const turn1Raw = turn1Chat.attribute['gen_ai.input.messages'] as string
+    expect(turn1Raw).toContain('first turn question')
+
+    const step1Raw = turn2Step1Chat.attribute['gen_ai.input.messages'] as string
+    expect(step1Raw).toContain('second turn question')
+    expect(step1Raw).not.toContain('first turn question')
+
+    // Same-turn tool loop context survives into the next step
+    const step2Raw = turn2Step2Chat.attribute['gen_ai.input.messages'] as string
+    expect(step2Raw).toContain('second turn question')
+    expect(step2Raw).toContain('tool payload')
+    expect(step2Raw).not.toContain('first turn question')
+
+    // Distinct traces per turn
+    expect(turn1Chat.traceID).not.toBe(turn2Step1Chat.traceID)
+    expect(turn2Step1Chat.traceID).toBe(turn2Step2Chat.traceID)
+
+    await coordinator.shutdown()
+  })
+
+  it('reports only the final answer on ENTRY and AGENT', async () => {
+    const coordinator = createCoordinator({ captureContent: true })
+    const current = session('final-output-session')
+    const started = Date.now() - 300
+    coordinator.adoptSession(current)
+    coordinator.onSessionEvent(current, event('turn/start', { turn: 1 }, 0, started))
+    coordinator.onSessionEvent(current, event(
+      'user/message',
+      message('u1', 'user', [{ type: 'text', text: 'do the thing' }], { kind: 'user' }),
+      1,
+      started + 1,
+    ))
+    coordinator.onSessionEvent(current, event('step/start', { turn: 1, step: 1 }, 2, started + 2))
+
+    // Intermediate tool-call message, then the terminal answer
+    coordinator.onSessionEvent(current, event(
+      'assistant/message',
+      {
+        turn: 1,
+        step: 1,
+        message: message(
+          'a-tool',
+          'assistant',
+          [{ type: 'tool-call', id: 'c1', name: 'read_file', arguments: '{}' }],
+          { kind: 'assistant' },
+        ),
+      },
+      3,
+      started + 3,
+    ))
+    coordinator.onSessionEvent(current, event(
+      'assistant/message',
+      {
+        turn: 1,
+        step: 1,
+        message: message(
+          'a-final',
+          'assistant',
+          [{ type: 'text', text: 'the final answer' }],
+          { kind: 'assistant' },
+        ),
+      },
+      4,
+      started + 4,
+    ))
+    coordinator.onSessionEvent(current, event('step/end', { turn: 1, step: 1 }, 5, Date.now()))
+    coordinator.onSessionEvent(current, event(
+      'turn/end',
+      { turn: 1, reason: { kind: 'completed' } },
+      6,
+      Date.now(),
+    ))
+
+    const spans = getEnqueuedSpans(coordinator)
+    for (const kind of ['entry', 'agent']) {
+      const span = spans.find(s => s.spanKind === kind)!
+      const outputs = JSON.parse(span.attribute['gen_ai.output.messages'] as string)
+      expect(outputs).toHaveLength(1)
+      expect(JSON.stringify(outputs)).toContain('the final answer')
+      expect(JSON.stringify(outputs)).not.toContain('read_file')
+    }
 
     await coordinator.shutdown()
   })

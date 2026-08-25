@@ -9,7 +9,7 @@ import { createRequire } from 'node:module'
 import type { CLSSpan } from './cls-types.js'
 import type { ResolvedClsConfig } from './config.js'
 import type { DshLogger } from './dsh-types.js'
-import { getLocalIp, toAttrString } from './utils.js'
+import { getLocalIp } from './utils.js'
 import { VERSION } from './version.js'
 
 const require = createRequire(import.meta.url)

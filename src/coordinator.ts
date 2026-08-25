@@ -55,8 +55,11 @@ interface LlmState {
   ended: boolean
   firstTokenSeen: boolean
   firstTokenMono?: number
-  /** Index into options.messages marking the start of new (non-history) messages for this turn. */
-  newMessagesOffset: number
+  /**
+   * Snapshot of the current turn's model-visible context at request time.
+   * Empty when content capture is disabled.
+   */
+  inputMessages: InputMessage[]
 }
 
 interface StepState {
@@ -82,10 +85,14 @@ interface InputMessage {
   parts: unknown[]
 }
 
+/**
+ * CLS GenAI output message.
+ * Serialized shape: `[{ "role": "assistant", "parts": [...], "finish_reason": "stop" }]`
+ */
 interface OutputMessage {
   role: string
   parts: unknown[]
-  finishReason: string
+  finish_reason: string
 }
 
 interface TurnState {
@@ -98,6 +105,11 @@ interface TurnState {
   model?: string
   provider?: string
   usage: UsageTotals
+  /**
+   * Model-visible context accumulated from events observed since turn/start.
+   * Used for LLM span inputs so a trace never repeats earlier turns' history.
+   */
+  contextMessages: DshMessage[]
   inputs: InputMessage[]
   outputs: OutputMessage[]
 }
@@ -114,17 +126,22 @@ function eventData<T>(event: DshSessionEvent): T {
   return event.data as T
 }
 
+/**
+ * Pass the DSH finish/turn reason kind through as-is.
+ * Values come straight from DSH (`stop`, `tool-calls`, `max-tokens`, `completed`,
+ * `blocked`, `aborted`, `interrupted`, `error`, ...) and are reported unmodified
+ * so the span reflects exactly what the harness emitted.
+ */
 function mapFinishReason(reason: string | undefined): string {
-  switch (reason) {
-    case 'tool-calls': return 'tool_calls'
-    case 'max-tokens': return 'length'
-    case 'aborted': return 'cancelled'
-    case 'stop':
-    case 'error':
-      return reason
-    default:
-      return reason ?? 'unknown'
-  }
+  return reason ?? 'unknown'
+}
+
+/** DSH reason kinds that represent an unsuccessful outcome. */
+const FAILURE_REASON_KINDS = new Set(['error', 'aborted', 'interrupted', 'blocked'])
+
+/** Whether a DSH reason kind should mark the span status as ERROR. */
+function isFailureReason(reason: string): boolean {
+  return FAILURE_REASON_KINDS.has(reason)
 }
 
 function finishFailure(reason: DshTurnReason): DshFailure | undefined {
@@ -224,18 +241,41 @@ function mapInputMessage(message: DshMessage): InputMessage {
   }
 }
 
+/**
+ * Whether a user/message event carries the human's direct turn request.
+ *
+ * DSH also emits synthetic model-visible context (runtime snapshots, skill
+ * catalogs, goals, coordinator relays) as user/message events, so the event
+ * type alone cannot distinguish them — only `source.kind` can.
+ */
+function isDirectUserInput(message: DshMessage): boolean {
+  return message.source.kind === 'user'
+}
+
+/**
+ * Select the single turn-level answer consumers should treat as the agent result.
+ *
+ * A tool loop emits one or more tool-call assistant messages before the terminal
+ * response. Interrupted or failed turns may never produce a terminal message, so
+ * the last available assistant message stays the most useful fallback.
+ */
+function selectFinalOutputMessages(outputs: readonly OutputMessage[]): OutputMessage[] {
+  const final = outputs.at(-1)
+  return final === undefined ? [] : [final]
+}
+
 function mapOutputMessage(
   blocks: readonly DshContentBlock[],
   finishReason: string,
 ): OutputMessage {
-  return { role: 'assistant', parts: mapContent(blocks), finishReason }
+  return { role: 'assistant', parts: mapContent(blocks), finish_reason: finishReason }
 }
 
 function mapOutputMessageFromDsh(
   message: DshMessage,
   finishReason: string,
 ): OutputMessage {
-  return { role: message.role, parts: mapContent(message.content), finishReason }
+  return { role: message.role, parts: mapContent(message.content), finish_reason: finishReason }
 }
 
 function mapSystemInstruction(system: string | undefined): unknown[] {
@@ -416,6 +456,7 @@ export class DshClsCoordinator {
       step: undefined,
       startTime,
       usage: usageTotals(),
+      contextMessages: [],
       inputs: [],
       outputs: [],
     }
@@ -449,23 +490,14 @@ export class DshClsCoordinator {
 
     const attempt = step.nextAttempt++
 
-    // Calculate the offset for new messages in this turn.
-    // Messages before this offset are conversation history from previous turns.
-    // For attempt > 1 (retry in the same step), all messages are relevant.
-    // For the first attempt, messages added during this turn start after the history baseline.
-    // Heuristic: messages whose source.kind is 'user' at the tail are this turn's input.
-    const messages = options.messages
-    let newMessagesOffset = 0
-    if (attempt === 1 && messages.length > 0) {
-      // Find the last user message — everything from there onward is this turn's new input
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i]
-        if (msg && msg.role === 'user') {
-          newMessagesOffset = i
-          break
-        }
-      }
-    }
+    // DSH's provider request carries the complete session history, but a trace
+    // covers a single turn. Capture only the context accumulated since
+    // turn/start so later traces never repeat earlier turns' conversation.
+    // Within a turn this still grows across steps, keeping assistant tool calls
+    // and tool results from previous steps of the same turn.
+    const inputMessages = this.config.captureContent
+      ? mapInputMessages(turn.contextMessages)
+      : []
 
     const llm: LlmState = {
       spanId: newSpanId(),
@@ -476,7 +508,7 @@ export class DshClsCoordinator {
       startMono: performance.now(),
       ended: false,
       firstTokenSeen: false,
-      newMessagesOffset,
+      inputMessages,
     }
     step.llms.add(llm)
     turn.model = options.model
@@ -564,7 +596,7 @@ export class DshClsCoordinator {
     if (state.ended) return
     state.ended = true
     const aborted = state.options.signal?.aborted === true
-    const finishReason = aborted ? 'cancelled' : 'error'
+    const finishReason = aborted ? 'aborted' : 'error'
 
     const session = this.sessions.get(String(state.options.sessionId))
     const turn = session?.turn
@@ -624,6 +656,10 @@ export class DshClsCoordinator {
   ): void {
     const step = state.turn?.step
     if (state.turn?.turn !== data.turn || step?.step !== data.step) return
+    // A tool result is a model-visible input to the next step of this turn, so it
+    // belongs in the trace-local LLM context — but not in the direct ENTRY/AGENT
+    // input list, which describes the human request.
+    if (this.config.captureContent) state.turn.contextMessages.push(data.message)
     const callId = typeof data.message.source.callId === 'string'
       ? data.message.source.callId
       : undefined
@@ -676,6 +712,12 @@ export class DshClsCoordinator {
 
   private captureTurnInput(state: SessionState, message: DshMessage): void {
     if (state.turn === undefined) return
+    // Every user/message after turn/start is part of this trace's model-visible
+    // context, including DSH's synthetic injections.
+    if (this.config.captureContent) state.turn.contextMessages.push(message)
+    // ENTRY and AGENT describe only the direct human request, so injected
+    // context must not be presented as the user's own input.
+    if (!isDirectUserInput(message)) return
     state.turn.inputs.push(mapInputMessage(message))
   }
 
@@ -685,6 +727,8 @@ export class DshClsCoordinator {
     const finish = active.step?.step === step
       ? active.step.lastFinishReason ?? 'unknown'
       : 'unknown'
+    // Assistant output feeds the next step of the same turn (tool loop).
+    if (this.config.captureContent) active.contextMessages.push(message)
     active.outputs.push(mapOutputMessageFromDsh(message, finish))
   }
 
@@ -695,13 +739,16 @@ export class DshClsCoordinator {
 
     const finishReason = mapFinishReason(reason.kind)
     const failure = finishFailure(reason)
+    // ENTRY and AGENT report the turn's result, not every intermediate tool-call
+    // message. Those stay observable on the step and chat spans.
+    const finalOutputs = selectFinalOutputMessages(turn.outputs)
 
     // Emit agent span with final stats
-    const agentSpan = this.buildAgentSpanEnd(state, turn, endTime, finishReason, failure)
+    const agentSpan = this.buildAgentSpanEnd(state, turn, endTime, finishReason, failure, finalOutputs)
     this.flusher.enqueue(agentSpan)
 
     // Emit entry span (closed — now has end time and conversation content)
-    const entrySpan = this.buildEntrySpanEnd(state, turn, endTime, finishReason, failure)
+    const entrySpan = this.buildEntrySpanEnd(state, turn, endTime, finishReason, failure, finalOutputs)
     this.flusher.enqueue(entrySpan)
 
     this.debug(`closed turn ${state.sessionId}:${turn.turn} with reason ${reason.kind}`)
@@ -740,6 +787,7 @@ export class DshClsCoordinator {
     endTime: number,
     finishReason: string,
     failure: DshFailure | undefined,
+    finalOutputs: readonly OutputMessage[],
   ): CLSSpan {
     const span = createCLSSpan()
     span.spanKind = 'entry'
@@ -767,10 +815,10 @@ export class DshClsCoordinator {
     }
 
     // Conversation-level content capture (same as agent)
-    if (this.config.captureContent && (turn.inputs.length > 0 || turn.outputs.length > 0)) {
+    if (this.config.captureContent && (turn.inputs.length > 0 || finalOutputs.length > 0)) {
       attrs['gen_ai.input.messages'] = truncate(safeStringify(turn.inputs), this.config.contentMaxChars)
       attrs['gen_ai.output.messages'] = truncate(
-        safeStringify(turn.outputs.map(m => ({ role: m.role, parts: m.parts, finish_reason: m.finishReason }))),
+        safeStringify(finalOutputs),
         this.config.contentMaxChars,
       )
     }
@@ -785,6 +833,7 @@ export class DshClsCoordinator {
     endTime: number,
     finishReason: string,
     failure: DshFailure | undefined,
+    finalOutputs: readonly OutputMessage[],
   ): CLSSpan {
     const agentName = state.session.header.agentPreset || 'deepseek-harness'
     const span = createCLSSpan()
@@ -827,10 +876,10 @@ export class DshClsCoordinator {
     }
 
     // Conversation-level content capture
-    if (this.config.captureContent && (turn.inputs.length > 0 || turn.outputs.length > 0)) {
+    if (this.config.captureContent && (turn.inputs.length > 0 || finalOutputs.length > 0)) {
       span.attribute['gen_ai.input.messages'] = truncate(safeStringify(turn.inputs), this.config.contentMaxChars)
       span.attribute['gen_ai.output.messages'] = truncate(
-        safeStringify(turn.outputs.map(m => ({ role: m.role, parts: m.parts, finish_reason: m.finishReason }))),
+        safeStringify(finalOutputs),
         this.config.contentMaxChars,
       )
     }
@@ -854,7 +903,7 @@ export class DshClsCoordinator {
     span.stepID = `${sessionState?.sessionId ?? ''}:t${turn.turn}:s${step.step}`
     span.name = `react round_${step.step}`
     span.kind = 'INTERNAL'
-    span.statusCode = (finishReason === 'error' || finishReason === 'cancelled') ? 'ERROR' : 'OK'
+    span.statusCode = isFailureReason(finishReason) ? 'ERROR' : 'OK'
     span.statusMessage = ''
     span.start = msToNanoStr(step.startTime)
     span.end = msToNanoStr(endTime)
@@ -957,11 +1006,12 @@ export class DshClsCoordinator {
     attrs['dsh.llm.attempt'] = llm.attempt
     attrs['dsh.step'] = step?.step ?? 0
 
-    // Content capture — only report messages from this turn (not full history)
+    // Content capture — only this turn's context, never earlier turns' history
     if (this.config.captureContent) {
-      const currentTurnMessages = llm.options.messages.slice(llm.newMessagesOffset)
-      const inputMsgs = mapInputMessages(currentTurnMessages)
-      attrs['gen_ai.input.messages'] = truncate(safeStringify(inputMsgs), this.config.contentMaxChars)
+      attrs['gen_ai.input.messages'] = truncate(
+        safeStringify(llm.inputMessages),
+        this.config.contentMaxChars,
+      )
 
       if (llm.blocks.length > 0) {
         const output = mapOutputMessage(llm.blocks as DshContentBlock[], finishReason)
