@@ -59,7 +59,18 @@ export function apply(ctx: Context, config: Config): void {
 
   const resolvedConfig: ResolvedClsConfig = result
   const coordinator = new DshClsCoordinator(resolvedConfig, dsh.logger)
-  coordinator.start()
+
+  // The CLS client validates its options on construction. Telemetry must never
+  // take the host process down with it, so degrade to a no-op instead: bail out
+  // before registering listeners rather than leave a client that cannot upload.
+  try {
+    coordinator.start()
+  } catch (error: unknown) {
+    dsh.logger.warn(
+      `[cls-dsh] failed to initialize the CLS client, collection is disabled: ${String(error)}`,
+    )
+    return
+  }
 
   // Adopt existing sessions (do not replay events to avoid duplication after HMR)
   for (const session of dsh.sessions.list()) coordinator.adoptSession(session)

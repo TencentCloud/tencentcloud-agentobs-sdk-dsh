@@ -24,6 +24,16 @@ export interface Config {
   contentMaxChars: number
   /** Maximum number of spans in one batch upload. */
   batchMaxSize: number
+  /**
+   * Maximum serialized bytes per batch upload.
+   *
+   * Must stay below `CONST_MAX_PUT_SIZE` in tencentcloud-cls-sdk-js (19 MB since
+   * 1.1.1), which the SDK enforces locally: an oversize LogGroup throws
+   * `InvalidLogSize` before any request is sent, so retrying can never help.
+   * The default leaves headroom because `estimateSpanBytes` undercounts — it
+   * omits CLS field keys and JSON escape growth inside `attribute`.
+   */
+  maxBatchBytes: number
   /** Maximum queue size before dropping oldest spans (backpressure). */
   maxQueueSize: number
   /** Flush interval in milliseconds. */
@@ -47,6 +57,7 @@ export const Config: z<Config> = z.object({
   captureContent: z.boolean(),
   contentMaxChars: z.number().step(1).min(1).default(128_000),
   batchMaxSize: z.number().step(1).min(1).default(32),
+  maxBatchBytes: z.number().step(1).min(1024).default(10 * 1024 * 1024),
   maxQueueSize: z.number().step(1).min(1).default(2048),
   flushIntervalMs: z.number().step(1).min(1).default(5_000),
   retryTimes: z.number().step(1).min(0).default(3),
@@ -83,6 +94,7 @@ export interface ResolvedClsConfig {
   captureContent: boolean
   contentMaxChars: number
   batchMaxSize: number
+  maxBatchBytes: number
   maxQueueSize: number
   flushIntervalMs: number
   retryTimes: number
@@ -154,6 +166,7 @@ export function resolveClsConfig(config: Config): ResolveResult {
     captureContent: resolveCaptureContent(config.captureContent),
     contentMaxChars: config.contentMaxChars,
     batchMaxSize: config.batchMaxSize,
+    maxBatchBytes: config.maxBatchBytes,
     maxQueueSize: config.maxQueueSize,
     flushIntervalMs: config.flushIntervalMs,
     retryTimes: config.retryTimes,

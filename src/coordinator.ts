@@ -215,7 +215,10 @@ function mapContentBlock(block: DshContentBlock): unknown {
       }
     }
     default:
-      return value
+      // Copy instead of returning DSH's own object: mapped content is retained
+      // as a snapshot until the span is flushed, so it must not stay aliased to
+      // a block DSH may still mutate.
+      return { ...value }
   }
 }
 
@@ -495,6 +498,13 @@ export class DshClsCoordinator {
     // turn/start so later traces never repeat earlier turns' conversation.
     // Within a turn this still grows across steps, keeping assistant tool calls
     // and tool results from previous steps of the same turn.
+    //
+    // This MUST be a snapshot, never a live reference: the chat span is only
+    // flushed in `finishLlm`, and `turn.contextMessages` keeps being pushed to
+    // by response events (assistant output, tool results) in the meantime.
+    // Holding the array itself would let the response leak into the recorded
+    // request. `mapInputMessages` rebuilds messages and content, so the result
+    // is detached from the live array.
     const inputMessages = this.config.captureContent
       ? mapInputMessages(turn.contextMessages)
       : []
@@ -659,7 +669,7 @@ export class DshClsCoordinator {
     // A tool result is a model-visible input to the next step of this turn, so it
     // belongs in the trace-local LLM context — but not in the direct ENTRY/AGENT
     // input list, which describes the human request.
-    if (this.config.captureContent) state.turn.contextMessages.push(data.message)
+    state.turn.contextMessages.push(data.message)
     const callId = typeof data.message.source.callId === 'string'
       ? data.message.source.callId
       : undefined
@@ -712,9 +722,10 @@ export class DshClsCoordinator {
 
   private captureTurnInput(state: SessionState, message: DshMessage): void {
     if (state.turn === undefined) return
-    // Every user/message after turn/start is part of this trace's model-visible
-    // context, including DSH's synthetic injections.
-    if (this.config.captureContent) state.turn.contextMessages.push(message)
+    // Accumulate unconditionally: `captureContent` may be toggled mid-turn, and a
+    // gated push would leave this turn's context permanently incomplete. Storing
+    // references is cheap and the whole array is released at turn/end.
+    state.turn.contextMessages.push(message)
     // ENTRY and AGENT describe only the direct human request, so injected
     // context must not be presented as the user's own input.
     if (!isDirectUserInput(message)) return
@@ -728,7 +739,7 @@ export class DshClsCoordinator {
       ? active.step.lastFinishReason ?? 'unknown'
       : 'unknown'
     // Assistant output feeds the next step of the same turn (tool loop).
-    if (this.config.captureContent) active.contextMessages.push(message)
+    active.contextMessages.push(message)
     active.outputs.push(mapOutputMessageFromDsh(message, finish))
   }
 

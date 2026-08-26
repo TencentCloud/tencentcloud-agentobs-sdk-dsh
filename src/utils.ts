@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto'
-import { hostname } from 'node:os'
 import { networkInterfaces } from 'node:os'
+
+/** Fallback source IP, matching the CLS SDK's own `CONST_LOCAL_IP`. */
+const LOOPBACK_IP = '127.0.0.1'
 
 /** Generate 32-char hex trace ID. */
 export function newTraceId(): string {
@@ -28,7 +30,13 @@ export function durationMs(startMs: number, endMs: number): number {
   return Math.max(0, Math.round(endMs - startMs))
 }
 
-/** Get local IP address. */
+/**
+ * Best-effort local IPv4 address for the CLS `sourceIp` field.
+ *
+ * Falls back to loopback rather than the hostname: the CLS SDK requires a
+ * non-empty value but never validates its format, so a hostname would be stored
+ * as a malformed IP with no error anywhere.
+ */
 export function getLocalIp(): string {
   const interfaces = networkInterfaces()
   for (const name of Object.keys(interfaces)) {
@@ -40,7 +48,7 @@ export function getLocalIp(): string {
       }
     }
   }
-  return hostname()
+  return LOOPBACK_IP
 }
 
 /** Safe JSON stringify. */

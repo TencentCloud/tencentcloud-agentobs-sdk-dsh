@@ -3,6 +3,10 @@
  *
  * Batched upload with configurable batch size and flush interval.
  * Error handling: 4xx discards (non-retryable), 5xx uses SDK built-in retry.
+ *
+ * Span content is never modified here. `maxBatchBytes` only decides how spans are
+ * grouped into requests; keeping captured content byte-exact is the upstream
+ * `contentMaxChars` limit's job.
  */
 
 import { createRequire } from 'node:module'
@@ -39,18 +43,18 @@ interface ClsLogGroup {
 }
 interface ClsPutLogsRequest { topicId: string }
 
-const MAX_BATCH_BYTES = 900 * 1024
-
 export class CLSFlusher {
   private readonly config: ResolvedClsConfig
   private readonly logger: DshLogger
   private client: ClsClient | null = null
   private queue: CLSSpan[] = []
   private flushTimer: ReturnType<typeof setInterval> | null = null
-  private flushing = false
+  /** In-flight drain, so concurrent flushes join it rather than being skipped. */
+  private inFlight: Promise<void> | null = null
   private sentCount = 0
   private failedCount = 0
   private droppedCount = 0
+  private oversizeCount = 0
 
   constructor(config: ResolvedClsConfig, logger: DshLogger) {
     this.config = config
@@ -79,10 +83,13 @@ export class CLSFlusher {
   enqueue(span: CLSSpan): void {
     if (this.queue.length >= this.config.maxQueueSize) {
       const dropCount = Math.max(1, Math.floor(this.config.maxQueueSize * 0.1))
-      this.queue.splice(0, dropCount)
+      const evicted = this.queue.splice(0, dropCount)
       this.droppedCount += dropCount
+      const oldest = evicted[0]
       this.logger.warn(
-        `[cls-dsh] queue full (${this.config.maxQueueSize}), dropped ${dropCount} oldest span(s). total dropped=${this.droppedCount}`,
+        `[cls-dsh] queue full (${this.config.maxQueueSize}), dropped ${dropCount} oldest span(s). `
+        + `total dropped=${this.droppedCount}`
+        + (oldest ? ` | oldest: ${this.describeSpan(oldest)}` : ''),
       )
     }
     this.queue.push(span)
@@ -96,66 +103,110 @@ export class CLSFlusher {
     for (const s of spans) this.enqueue(s)
   }
 
-  /** Flush queued spans to CLS. */
+  /**
+   * Flush queued spans to CLS.
+   *
+   * Concurrent callers join the in-flight run instead of being dropped. Dropping
+   * meant a timer tick could silently skip a flush, and during shutdown there is
+   * no later tick to make up for it.
+   */
   async flush(): Promise<void> {
-    if (this.flushing || this.queue.length === 0) return
-    this.flushing = true
+    if (this.inFlight !== null) return this.inFlight
+    if (this.queue.length === 0) return
 
+    const run = this.drain()
+    this.inFlight = run
     try {
-      while (this.queue.length > 0) {
-        const batch: CLSSpan[] = []
-        let batchBytes = 0
-        while (this.queue.length > 0 && batch.length < this.config.batchMaxSize) {
-          const span = this.queue[0]!
-          const spanBytes = this.estimateSpanBytes(span)
-          if (batchBytes + spanBytes > MAX_BATCH_BYTES && batch.length > 0) break
-          batch.push(this.queue.shift()!)
-          batchBytes += spanBytes
-        }
-        if (batch.length === 0) break
-
-        try {
-          await this.send(batch)
-          this.sentCount += batch.length
-        } catch (err: unknown) {
-          this.failedCount += batch.length
-          const status = (err as { code?: number; statusCode?: number })?.code
-            ?? (err as { code?: number; statusCode?: number })?.statusCode ?? 0
-          if (status >= 400 && status < 500) {
-            this.logger.warn(
-              `[cls-dsh] ${status} (non-retryable), dropped ${batch.length} spans: ${(err as Error).message}`,
-            )
-          } else {
-            this.logger.warn(
-              `[cls-dsh] send failed (${status || 'unknown'}), ${batch.length} spans lost: ${(err as Error).message}`,
-            )
-          }
-        }
-      }
+      await run
     } finally {
-      this.flushing = false
+      this.inFlight = null
     }
   }
 
-  /** Stop flushing and send remaining data. */
+  /** Drain the queue in byte-bounded batches. Never throws; failures are logged. */
+  private async drain(): Promise<void> {
+    while (this.queue.length > 0) {
+      const batch: CLSSpan[] = []
+      let batchBytes = 0
+      while (this.queue.length > 0 && batch.length < this.config.batchMaxSize) {
+        const span = this.queue[0]!
+        const spanBytes = this.estimateSpanBytes(span)
+        if (batchBytes + spanBytes > this.config.maxBatchBytes && batch.length > 0) break
+        this.queue.shift()
+        // Span exceeds the whole budget on its own. Content is never altered:
+        // a silently rewritten span is worse than a visibly rejected one, so
+        // it is sent intact in a batch of its own and the risk is logged.
+        if (spanBytes > this.config.maxBatchBytes) {
+          this.reportOversize(span, spanBytes)
+        }
+        batchBytes += spanBytes
+        batch.push(span)
+      }
+      if (batch.length === 0) break
+
+      try {
+        await this.send(batch)
+        this.sentCount += batch.length
+      } catch (err: unknown) {
+        this.failedCount += batch.length
+        const status = (err as { code?: number; statusCode?: number })?.code
+          ?? (err as { code?: number; statusCode?: number })?.statusCode ?? 0
+        // Identify the lost spans so data gaps can be traced back to a request.
+        const lost = batch.map(s => this.describeSpan(s)).join('; ')
+        const message = (err as Error).message
+        if (message.includes('InvalidLogSize')) {
+          // The SDK rejected the batch locally on size, before any request.
+          // Retrying cannot help, so say so instead of blaming the network.
+          this.logger.warn(
+            `[cls-dsh] batch rejected locally by the CLS SDK on size (${batchBytes}B estimated), `
+            + `dropped ${batch.length} spans; lower maxBatchBytes or contentMaxChars: `
+            + `${message} | ${lost}`,
+          )
+        } else if (status >= 400 && status < 500) {
+          this.logger.warn(
+            `[cls-dsh] ${status} (non-retryable), dropped ${batch.length} spans `
+            + `(${batchBytes}B): ${message} | ${lost}`,
+          )
+        } else {
+          this.logger.warn(
+            `[cls-dsh] send failed (${status || 'unknown'}), ${batch.length} spans lost `
+            + `(${batchBytes}B): ${message} | ${lost}`,
+          )
+        }
+      }
+    }
+  }
+
+  /**
+   * Stop periodic flushing and drain whatever is still queued.
+   *
+   * `flush` joins an in-flight drain instead of returning early, so the final
+   * batch is no longer discarded when shutdown races an ongoing flush. Repeating
+   * only covers spans enqueued while a drain was running; the loop gives up if an
+   * attempt makes no progress, so a permanently failing send cannot spin here.
+   */
   async stop(): Promise<void> {
     if (this.flushTimer) {
       clearInterval(this.flushTimer)
       this.flushTimer = null
     }
-    const maxRetries = 5
-    let retries = 0
-    while (this.queue.length > 0 && retries < maxRetries) {
-      const prevLen = this.queue.length
+    const maxAttempts = 5
+    for (let attempt = 0; attempt < maxAttempts && this.queue.length > 0; attempt++) {
+      const before = this.queue.length
       await this.flush()
-      if (this.queue.length >= prevLen) break
-      retries++
+      if (this.queue.length === before) break
     }
     if (this.queue.length > 0) {
-      this.logger.warn(`[cls-dsh] stop: ${this.queue.length} span(s) discarded after retries`)
+      const remaining = this.queue.map(s => this.describeSpan(s)).slice(0, 5).join('; ')
+      this.logger.warn(
+        `[cls-dsh] stop: ${this.queue.length} span(s) discarded after retries | ${remaining}`,
+      )
     }
     if (this.config.debug) {
-      this.logger.info(`[cls-dsh] flusher stopped. sent=${this.sentCount} failed=${this.failedCount} dropped=${this.droppedCount}`)
+      this.logger.info(
+        `[cls-dsh] flusher stopped. sent=${this.sentCount} failed=${this.failedCount} `
+        + `dropped=${this.droppedCount} oversize=${this.oversizeCount}`,
+      )
     }
   }
 
@@ -169,6 +220,26 @@ export class CLSFlusher {
       }
     }
     return bytes
+  }
+
+  /** Identify a span in diagnostics without emitting captured content. */
+  private describeSpan(span: CLSSpan): string {
+    return `kind=${span.spanKind} name=${span.name} trace=${span.traceID} span=${span.spanID}`
+  }
+
+  /**
+   * Warn that a span exceeds the per-batch byte budget.
+   *
+   * The span is still uploaded unmodified. CLS may reject it, but a rejection is
+   * visible in the logs, whereas silently truncated content would be
+   * indistinguishable from a genuinely short prompt during analysis.
+   */
+  private reportOversize(span: CLSSpan, bytes: number): void {
+    this.oversizeCount++
+    this.logger.warn(
+      `[cls-dsh] span is ${bytes}B, above maxBatchBytes ${this.config.maxBatchBytes}B; `
+      + `sending unmodified, CLS may reject it: ${this.describeSpan(span)}`,
+    )
   }
 
   private async send(spans: CLSSpan[]): Promise<void> {

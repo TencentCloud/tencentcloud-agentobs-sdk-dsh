@@ -146,6 +146,25 @@ describe('plugin lifecycle', () => {
     expect(mocks.coordinator.shutdown).toHaveBeenCalledOnce()
   })
 
+  it('degrades to a no-op when the CLS client cannot be initialized', () => {
+    const { context, listeners, logger } = testContext([session('existing')])
+    // The SDK validates its options in the constructor (e.g. an empty sourceIp),
+    // and telemetry must not take the host process down with it.
+    mocks.coordinator.start.mockImplementationOnce(() => {
+      throw new Error('options sourceIp can not be empty')
+    })
+
+    expect(() => apply(context, testConfig())).not.toThrow()
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('failed to initialize the CLS client'),
+    )
+    // No listeners registered, so no span is produced by a client that cannot upload
+    expect(listeners.size).toBe(0)
+    expect(mocks.coordinator.adoptSession).not.toHaveBeenCalled()
+    expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining('[cls-dsh] loaded'))
+  })
+
   it('isolates session and close failures while still shutting down', async () => {
     const { context, listeners, logger, runCleanup } = testContext()
     apply(context, testConfig())

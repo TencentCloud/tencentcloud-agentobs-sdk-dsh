@@ -57,7 +57,7 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.1",
-    "tencentcloud-cls-sdk-js": "^1.1.0"
+    "tencentcloud-cls-sdk-js": "^1.1.1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",

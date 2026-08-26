@@ -452,4 +452,40 @@ describe('DshClsCoordinator', () => {
 
     await coordinator.shutdown()
   })
+
+  it('keeps mid-turn context when captureContent is enabled at runtime', async () => {
+    // Starts disabled: the earlier events of this turn must still be accumulated,
+    // otherwise enabling capture later would yield a permanently truncated context.
+    const coordinator = createCoordinator({ captureContent: false })
+    const config = (coordinator as unknown as { config: { captureContent: boolean } }).config
+    const current = session('toggle-session')
+    const started = Date.now() - 200
+
+    coordinator.adoptSession(current)
+    coordinator.onSessionEvent(current, event('turn/start', { turn: 1 }, 0, started))
+    coordinator.onSessionEvent(current, event(
+      'user/message',
+      message('u1', 'user', [{ type: 'text', text: 'question before toggle' }], { kind: 'user' }),
+      1,
+      started + 1,
+    ))
+    coordinator.onSessionEvent(current, event('step/start', { turn: 1, step: 1 }, 2, started + 2))
+
+    // Operator flips the switch in the middle of the turn
+    config.captureContent = true
+
+    await collect(coordinator.interceptLlm(llmOptions('toggle-session'), successfulStream))
+    coordinator.onSessionEvent(current, event('step/end', { turn: 1, step: 1 }, 3, Date.now()))
+    coordinator.onSessionEvent(current, event(
+      'turn/end',
+      { turn: 1, reason: { kind: 'completed' } },
+      4,
+      Date.now(),
+    ))
+
+    const chat = getEnqueuedSpans(coordinator).find(s => s.spanKind === 'chat')!
+    expect(chat.attribute['gen_ai.input.messages']).toContain('question before toggle')
+
+    await coordinator.shutdown()
+  })
 })

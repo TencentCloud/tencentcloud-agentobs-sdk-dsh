@@ -154,6 +154,7 @@ dsh --profile web
 | `captureContent` | `true` | 捕获 prompts/responses/tool 内容（设为 `false` 关闭） |
 | `contentMaxChars` | `128000` | 单个内容属性最大字符数 |
 | `batchMaxSize` | `32` | 每批上报最大 span 数 |
+| `maxBatchBytes` | `10485760` | 每批上报最大字节数（10MB）。必须小于 SDK 的 19MB 硬限制，否则整批会在本地被拒 |
 | `maxQueueSize` | `2048` | 队列上限，超限丢弃最旧 span |
 | `flushIntervalMs` | `5000` | 定时刷新间隔（毫秒） |
 | `retryTimes` | `3` | 上报重试次数 |

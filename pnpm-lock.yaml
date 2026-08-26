@@ -12,8 +12,8 @@ importers:
         specifier: ^3.18.1
         version: 3.18.1
       tencentcloud-cls-sdk-js:
-        specifier: ^1.1.0
-        version: 1.1.0
+        specifier: ^1.1.1
+        version: 1.1.1
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.0.1
@@ -583,8 +583,8 @@ packages:
     resolution: {integrity: sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw==}
     engines: {node: '>=8'}
 
-  tencentcloud-cls-sdk-js@1.1.0:
-    resolution: {integrity: sha512-eRbbFVZLWLuCEGBZFcKQF83lSEqF7jXYinZA4PAgkNyWS4CHNtV1HExmWlPpDVgsqpuXXDvfvQMfu2G+Wp/htw==}
+  tencentcloud-cls-sdk-js@1.1.1:
+    resolution: {integrity: sha512-zHS2UPbs+gtPjz8O3/LWlBAkdZ3mNgEgWC9CB68bpUm5WvXBAVgz2l6ECCDcdbggZ0vwdbQWppX5oJKKXVoOqQ==}
 
   tinybench@2.9.0:
     resolution: {integrity: sha512-0+DUvqWMValLmha6lr4kD8iAMK1HzV0/aKnCtWb9v9641TnP/MFb7Pc2bxoxQjTXAErryXVgUOfv2YqNllqGeg==}
@@ -1168,7 +1168,7 @@ snapshots:
     dependencies:
       has-flag: 4.0.0
 
-  tencentcloud-cls-sdk-js@1.1.0:
+  tencentcloud-cls-sdk-js@1.1.1:
     dependencies:
       axios: 1.19.0
       protobufjs: 7.6.5

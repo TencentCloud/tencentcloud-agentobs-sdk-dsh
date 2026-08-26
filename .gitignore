@@ -23,3 +23,7 @@ package-lock.json
 # Environment
 .env
 .env.*
+
+# Scratch / generated working dirs (e.g. changelog screenshot tooling)
+tmp-*/
+.tmp-*/

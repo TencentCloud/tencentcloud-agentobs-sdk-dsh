@@ -1,6 +1,24 @@
+import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { resolveCaptureContent, resolveClsConfig } from '../src/config.js'
+import { Config, resolveCaptureContent, resolveClsConfig } from '../src/config.js'
 import { testConfig } from './helpers.js'
+
+const require = createRequire(import.meta.url)
+
+describe('maxBatchBytes vs. the CLS SDK limit', () => {
+  it('keeps the default below the size the SDK enforces locally', () => {
+    // The SDK rejects an oversize LogGroup before sending, throwing
+    // InvalidLogSize. Retrying never helps, so our default must stay under it.
+    const { CONST_MAX_PUT_SIZE } = require(
+      'tencentcloud-cls-sdk-js/dist/common/constants.js',
+    ) as { CONST_MAX_PUT_SIZE: number }
+
+    const applied = new Config({} as Config) as { maxBatchBytes: number }
+
+    expect(CONST_MAX_PUT_SIZE).toBeGreaterThan(0)
+    expect(applied.maxBatchBytes).toBeLessThan(CONST_MAX_PUT_SIZE)
+  })
+})
 
 describe('resolveCaptureContent', () => {
   it('enables content capture by default when neither config nor environment is set', () => {

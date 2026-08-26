@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest'
-import { newTraceId, newSpanId, msToNanoStr, durationNanoStr, durationMs, toAttrString, safeStringify } from '../src/utils.js'
+import { describe, expect, it, vi } from 'vitest'
+import { networkInterfaces } from 'node:os'
+import { newTraceId, newSpanId, msToNanoStr, durationNanoStr, durationMs, toAttrString, safeStringify, getLocalIp } from '../src/utils.js'
+
+// `node:os` exports are non-configurable, so the module is mocked instead of spied on.
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>()
+  return { ...actual, networkInterfaces: vi.fn(actual.networkInterfaces) }
+})
+
+const mockedInterfaces = vi.mocked(networkInterfaces)
 
 describe('utils', () => {
   it('generates trace IDs of 32 hex chars', () => {
@@ -47,5 +56,24 @@ describe('utils', () => {
     // safeStringify should not throw
     const result = safeStringify(obj)
     expect(typeof result).toBe('string')
+  })
+
+  it('returns an external IPv4 address when one exists', () => {
+    mockedInterfaces.mockReturnValueOnce({
+      lo0: [{ address: '127.0.0.1', family: 'IPv4', internal: true }],
+      en0: [{ address: '192.168.1.20', family: 'IPv4', internal: false }],
+    } as unknown as ReturnType<typeof networkInterfaces>)
+
+    expect(getLocalIp()).toBe('192.168.1.20')
+  })
+
+  it('falls back to loopback rather than a hostname when no IPv4 is found', () => {
+    // The CLS SDK requires a non-empty sourceIp but never validates its format,
+    // so a hostname fallback would be stored as a malformed IP with no error.
+    mockedInterfaces.mockReturnValueOnce({
+      lo0: [{ address: '127.0.0.1', family: 'IPv4', internal: true }],
+    } as unknown as ReturnType<typeof networkInterfaces>)
+
+    expect(getLocalIp()).toBe('127.0.0.1')
   })
 })
