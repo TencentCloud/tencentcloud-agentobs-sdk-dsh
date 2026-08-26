@@ -149,6 +149,7 @@ Or set `captureContent: false` in the plugin configuration.
 | `captureContent` | `true` | Capture prompts/responses/tool content (set to `false` to disable) |
 | `contentMaxChars` | `128000` | Maximum characters per content attribute |
 | `batchMaxSize` | `32` | Maximum spans per upload batch |
+| `maxBatchBytes` | `10485760` | Maximum bytes per upload batch (10MB). Must stay below the SDK's 19MB hard limit, or the whole batch is rejected locally |
 | `maxQueueSize` | `2048` | Queue limit; oldest spans are dropped when exceeded |
 | `flushIntervalMs` | `5000` | Scheduled flush interval (milliseconds) |
 | `retryTimes` | `3` | Upload retry count |
@@ -173,6 +174,10 @@ pnpm run check
 pnpm test
 pnpm run build
 ```
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

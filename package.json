@@ -18,6 +18,7 @@
     "cordis.patch.example.yml",
     "README.md",
     "README.en.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {

@@ -180,6 +180,10 @@ pnpm test
 pnpm run build
 ```
 
+## 变更记录
+
+见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## License
 
 [Apache-2.0](LICENSE)
