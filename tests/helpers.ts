@@ -13,6 +13,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     enabled: true,
     endpoint: 'ap-guangzhou.cls.tencentcs.com',
     topicId: 'test-topic-id-12345',
+    apiKey: '',
     secretId: 'test-secret-id',
     secretKey: 'test-secret-key',
     uin: '',
@@ -34,6 +35,7 @@ export function testResolvedConfig(overrides: Partial<ResolvedClsConfig> = {}): 
   return {
     endpoint: 'ap-guangzhou.cls.tencentcs.com',
     topicId: 'test-topic-id-12345',
+    apiKey: '',
     secretId: 'test-secret-id',
     secretKey: 'test-secret-key',
     uin: '',

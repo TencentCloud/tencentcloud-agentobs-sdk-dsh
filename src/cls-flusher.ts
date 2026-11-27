@@ -10,6 +10,7 @@
  */
 
 import { createRequire } from 'node:module'
+import { API_KEY_PLACEHOLDER_UIN, type ApiKeyCapableClient, useApiKeyAuth } from './cls-apikey.js'
 import type { CLSSpan } from './cls-types.js'
 import type { ResolvedClsConfig } from './config.js'
 import type { DshLogger } from './dsh-types.js'
@@ -30,8 +31,8 @@ const { AsyncClient, LogItem, Content, LogGroup, PutLogsRequest } = require('ten
   PutLogsRequest: new (topicId: string, logGroup: ClsLogGroup) => ClsPutLogsRequest
 }
 
-interface ClsClient {
-  PutLogs(request: ClsPutLogsRequest): Promise<{ get_request_id?(): string }>
+interface ClsClient extends ApiKeyCapableClient {
+  PutLogs(request: ClsPutLogsRequest): Promise<{ getHeader?(key: string): unknown }>
 }
 interface ClsLogItem {
   pushBack(content: ClsContent): void
@@ -64,18 +65,39 @@ export class CLSFlusher {
   /** Initialize CLS client and start periodic flushing. */
   start(): void {
     const endpoint = this.config.endpoint.replace(/^https?:\/\//, '')
-    this.client = new AsyncClient({
-      endpoint,
-      secretId: this.config.secretId,
-      secretKey: this.config.secretKey,
-      uin: this.config.uin,
-      user_agent: DEFAULT_USER_AGENT,
-      sourceIp: getLocalIp(),
-      retry_times: this.config.retryTimes,
-    })
+    const { apiKey } = this.config
+    if (apiKey) {
+      // The key is sent as-is, so default to https; the SDK itself would pick
+      // http for a bare host. An explicit http:// is honoured but flagged.
+      const insecure = /^http:\/\//i.test(this.config.endpoint)
+      if (insecure) {
+        this.logger.warn('[cls-dsh] CLS endpoint is http://, the API key will be sent in plaintext')
+      }
+      this.client = new AsyncClient({
+        endpoint: `${insecure ? 'http' : 'https'}://${endpoint}`,
+        uin: API_KEY_PLACEHOLDER_UIN,
+        user_agent: DEFAULT_USER_AGENT,
+        sourceIp: getLocalIp(),
+        retry_times: this.config.retryTimes,
+      })
+      useApiKeyAuth(this.client, apiKey)
+    } else {
+      this.client = new AsyncClient({
+        endpoint,
+        secretId: this.config.secretId,
+        secretKey: this.config.secretKey,
+        uin: this.config.uin,
+        user_agent: DEFAULT_USER_AGENT,
+        sourceIp: getLocalIp(),
+        retry_times: this.config.retryTimes,
+      })
+    }
     this.flushTimer = setInterval(() => { this.flush().catch(() => {}) }, this.config.flushIntervalMs)
     if (this.config.debug) {
-      this.logger.info(`[cls-dsh] flusher initialized → ${endpoint} topic=${this.config.topicId.slice(0, 8)}...`)
+      const auth = apiKey ? 'apikey' : this.config.secretId && this.config.secretKey ? 'signature' : 'uin'
+      this.logger.info(
+        `[cls-dsh] flusher initialized → ${endpoint} topic=${this.config.topicId.slice(0, 8)}... auth=${auth}`,
+      )
     }
   }
 
@@ -149,11 +171,14 @@ export class CLSFlusher {
         this.sentCount += batch.length
       } catch (err: unknown) {
         this.failedCount += batch.length
+        const message = (err as Error).message
+        // The SDK's exceptions carry no status field; it only appears in the
+        // message, e.g. "send log failed with HTTP 401. topic=...".
         const status = (err as { code?: number; statusCode?: number })?.code
-          ?? (err as { code?: number; statusCode?: number })?.statusCode ?? 0
+          ?? (err as { code?: number; statusCode?: number })?.statusCode
+          ?? Number(/\bHTTP (\d{3})\b/.exec(message ?? '')?.[1] ?? 0)
         // Identify the lost spans so data gaps can be traced back to a request.
         const lost = batch.map(s => this.describeSpan(s)).join('; ')
-        const message = (err as Error).message
         if (message.includes('InvalidLogSize')) {
           // The SDK rejected the batch locally on size, before any request.
           // Retrying cannot help, so say so instead of blaming the network.
@@ -163,8 +188,10 @@ export class CLSFlusher {
             + `${message} | ${lost}`,
           )
         } else if (status >= 400 && status < 500) {
+          // 401 will not fix itself; point at the credentials instead of the data.
+          const hint = status === 401 ? ' — CLS rejected the credentials, check CLS_API_KEY / secrets' : ''
           this.logger.warn(
-            `[cls-dsh] ${status} (non-retryable), dropped ${batch.length} spans `
+            `[cls-dsh] ${status} (non-retryable${hint}), dropped ${batch.length} spans `
             + `(${batchBytes}B): ${message} | ${lost}`,
           )
         } else {
@@ -288,7 +315,8 @@ export class CLSFlusher {
     const request = new PutLogsRequest(this.config.topicId, logGroup)
     const response = await this.client.PutLogs(request)
     if (this.config.debug) {
-      const requestId = response.get_request_id?.() ?? ''
+      // getHeader returns [] for a missing header, which stringifies to ''.
+      const requestId = String(response.getHeader?.('x-cls-requestid') ?? '')
       this.logger.info(`[cls-dsh] uploaded ${spans.length} spans, request_id=${requestId}`)
     }
   }

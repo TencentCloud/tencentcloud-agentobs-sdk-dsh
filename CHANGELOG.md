@@ -5,6 +5,27 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.1] - 2026-11-25
+
+### 新增
+
+- **支持 API Key 鉴权上报。** 新增 `apiKey` 配置项（环境变量 `CLS_API_KEY`），
+  请求只携带 `x-cls-apikey` 请求头，无需 SecretId/SecretKey 签名。多种凭证同时
+  配置时，优先级为 API Key > SecretId/SecretKey > UIN。
+
+  `tencentcloud-cls-sdk-js` 1.1.1 尚不支持 API Key，插件复用其 protobuf 编码、
+  体积校验与重试，仅替换发送步骤（SDK 内部方法 `sendLogs`）。为此依赖改为锁定
+  `1.1.1`，升级 SDK 时需回归该路径。
+- API Key 模式下，未带协议的 endpoint 默认走 HTTPS（SDK 默认是 HTTP）；显式配置
+  `http://` 时会告警 key 将明文传输。
+- 401 被识别为凭证错误并在日志中提示检查凭证，不重试。日志中不会出现 key。
+- 包含空白或控制字符的 API Key 会被视为配置错误，不会静默回退到其他鉴权方式。
+
+### 修复
+
+- **debug 日志中的 `request_id` 始终为空。** SDK 的响应对象没有 `get_request_id`
+  方法，现改为读取 `x-cls-requestid` 响应头。
+
 ## [0.1.0] - 2026-08-26
 
 ### 变更

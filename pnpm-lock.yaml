@@ -12,7 +12,7 @@ importers:
         specifier: ^3.18.1
         version: 3.18.1
       tencentcloud-cls-sdk-js:
-        specifier: ^1.1.1
+        specifier: 1.1.1
         version: 1.1.1
     devDependencies:
       '@deepseek-ai/cordis':

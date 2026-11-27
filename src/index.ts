@@ -39,7 +39,9 @@ export function apply(ctx: Context, config: Config): void {
       + '  Option 1: Set environment variables:\n'
       + '    export CLS_ENDPOINT=ap-guangzhou.cls.tencentcs.com\n'
       + '    export CLS_TOPIC_ID=<your-topic-id>\n'
-      + '    # strong auth:\n'
+      + '    # API Key auth (takes precedence):\n'
+      + '    export CLS_API_KEY=<your-api-key>\n'
+      + '    # or strong auth:\n'
       + '    export CLS_SECRET_ID=<your-secret-id>\n'
       + '    export CLS_SECRET_KEY=<your-secret-key>\n'
       + '    # or authless (weak auth) upload:\n'
@@ -49,8 +51,10 @@ export function apply(ctx: Context, config: Config): void {
       + '      config:\n'
       + '        endpoint: ap-guangzhou.cls.tencentcs.com\n'
       + '        topicId: <your-topic-id>\n'
-      + '        secretId: <your-secret-id>\n'
-      + '        secretKey: <your-secret-key>\n'
+      + '        apiKey: <your-api-key>\n'
+      + '        # or strong auth:\n'
+      + '        # secretId: <your-secret-id>\n'
+      + '        # secretKey: <your-secret-key>\n'
       + '        # or authless (weak auth) upload:\n'
       + '        # uin: <your-uin>',
     )
