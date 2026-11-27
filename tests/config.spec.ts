@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { Config, resolveCaptureContent, resolveClsConfig } from '../src/config.js'
 import { testConfig } from './helpers.js'
 
@@ -113,7 +113,7 @@ describe('resolveClsConfig', () => {
     const result = resolveClsConfig(config)
     expect('missing' in result).toBe(true)
     if ('missing' in result) {
-      expect(result.missing).toContain('CLS_SECRET_ID + CLS_SECRET_KEY (or CLS_UIN)')
+      expect(result.missing).toContain('CLS_API_KEY (or CLS_SECRET_ID + CLS_SECRET_KEY, or CLS_UIN)')
     }
   })
 
@@ -182,5 +182,58 @@ describe('resolveClsConfig', () => {
       })
     }
     delete process.env['OTEL_RESOURCE_ATTRIBUTES']
+  })
+})
+
+describe('resolveClsConfig API Key auth', () => {
+  afterEach(() => {
+    delete process.env['CLS_API_KEY']
+    delete process.env['CLS_SECRET_ID']
+    delete process.env['CLS_SECRET_KEY']
+    delete process.env['CLS_UIN']
+  })
+
+  it('resolves with only an API Key', () => {
+    const resolved = resolveClsConfig(testConfig({ apiKey: 'test-api-key', secretId: '', secretKey: '' }))
+    expect('missing' in resolved).toBe(false)
+    if (!('missing' in resolved)) expect(resolved.apiKey).toBe('test-api-key')
+  })
+
+  it('reads CLS_API_KEY from the environment and trims it', () => {
+    process.env['CLS_API_KEY'] = '  env-api-key\n'
+    const resolved = resolveClsConfig(testConfig({ apiKey: '', secretId: '', secretKey: '' }))
+    expect('missing' in resolved).toBe(false)
+    if (!('missing' in resolved)) expect(resolved.apiKey).toBe('env-api-key')
+  })
+
+  it('prefers the plugin setting over CLS_API_KEY', () => {
+    process.env['CLS_API_KEY'] = 'env-api-key'
+    const resolved = resolveClsConfig(testConfig({ apiKey: 'plugin-api-key' }))
+    if (!('missing' in resolved)) expect(resolved.apiKey).toBe('plugin-api-key')
+  })
+
+  it('keeps the API Key when secrets and uin are also set (API Key wins)', () => {
+    const resolved = resolveClsConfig(testConfig({ apiKey: 'test-api-key', uin: '100000000000' }))
+    expect('missing' in resolved).toBe(false)
+    if (!('missing' in resolved)) expect(resolved.apiKey).toBe('test-api-key')
+  })
+
+  it('accepts an invalid uin when an API Key is set, since uin is unused', () => {
+    const resolved = resolveClsConfig(testConfig({ apiKey: 'test-api-key', secretId: '', secretKey: '', uin: 'x' }))
+    expect('missing' in resolved).toBe(false)
+  })
+
+  it('leaves apiKey empty when only secrets are configured', () => {
+    const resolved = resolveClsConfig(testConfig())
+    if (!('missing' in resolved)) expect(resolved.apiKey).toBe('')
+  })
+
+  it('rejects a malformed API Key instead of falling back to secrets', () => {
+    const result = resolveClsConfig(testConfig({ apiKey: 'bad key' }))
+    expect('missing' in result).toBe(true)
+    if ('missing' in result) {
+      expect(result.missing).toContain('CLS_API_KEY (must not contain whitespace or control characters)')
+      expect(result.missing.join(' ')).not.toContain('bad key')
+    }
   })
 })

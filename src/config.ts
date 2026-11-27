@@ -8,11 +8,13 @@ export interface Config {
   endpoint?: string
   /** CLS log topic ID. */
   topicId?: string
+  /** CLS API Key. Takes precedence over secretId/secretKey and uin when set. */
+  apiKey?: string
   /** Tencent Cloud SecretId. */
   secretId?: string
   /** Tencent Cloud SecretKey. */
   secretKey?: string
-  /** Tencent Cloud UIN (digits only) for authless (weak auth) upload. Mutually exclusive with secretId/secretKey. */
+  /** Tencent Cloud UIN (digits only) for authless (weak auth) upload. Used only when no apiKey or secretId/secretKey is set. */
   uin?: string
   /** Service name for CLS resource identification. */
   serviceName?: string
@@ -49,6 +51,7 @@ export const Config: z<Config> = z.object({
   enabled: z.boolean().default(true),
   endpoint: z.string(),
   topicId: z.string(),
+  apiKey: z.string(),
   secretId: z.string(),
   secretKey: z.string(),
   uin: z.string(),
@@ -86,6 +89,8 @@ export function resolveCaptureContent(
 export interface ResolvedClsConfig {
   endpoint: string
   topicId: string
+  /** Non-empty selects API Key auth; secretId/secretKey/uin are then ignored. */
+  apiKey: string
   secretId: string
   secretKey: string
   uin: string
@@ -124,6 +129,7 @@ export type ResolveResult =
 export function resolveClsConfig(config: Config): ResolveResult {
   const endpoint = config.endpoint || process.env['CLS_ENDPOINT'] || ''
   const topicId = config.topicId || process.env['CLS_TOPIC_ID'] || ''
+  const apiKey = (config.apiKey || process.env['CLS_API_KEY'] || '').trim()
   const secretId = config.secretId || process.env['CLS_SECRET_ID'] || ''
   const secretKey = config.secretKey || process.env['CLS_SECRET_KEY'] || ''
   const uin = config.uin || process.env['CLS_UIN'] || ''
@@ -132,20 +138,28 @@ export function resolveClsConfig(config: Config): ResolveResult {
     || process.env['OTEL_SERVICE_NAME']
     || 'deepseek-harness'
 
-  // Strong auth requires both secretId and secretKey; weak (authless) auth
-  // requires a digits-only UIN. The two are mutually exclusive.
+  // Auth precedence: API Key > secretId + secretKey (signed) > digits-only UIN
+  // (weak auth). The first complete one wins; the rest are ignored.
+  // An API Key travels verbatim in a header, so whitespace or control
+  // characters would make the request fail with the key echoed in the error.
+  // A malformed key is reported rather than silently falling back.
+  const apiKeyValid = !/[\s\x00-\x1f\x7f]/.test(apiKey)
+  const hasApiKey = apiKey !== ''
   const hasStrongAuth = secretId !== '' && secretKey !== ''
   const hasWeakAuth = uin !== '' && /^\d+$/.test(uin)
+  const hasAuth = hasApiKey ? apiKeyValid : hasStrongAuth || hasWeakAuth
 
-  if (!endpoint || !topicId || (!hasStrongAuth && !hasWeakAuth)) {
+  if (!endpoint || !topicId || !hasAuth) {
     const missing: string[] = []
     if (!endpoint) missing.push('CLS_ENDPOINT')
     if (!topicId) missing.push('CLS_TOPIC_ID')
-    if (!hasStrongAuth && !hasWeakAuth) {
-      if (uin !== '') {
+    if (!hasAuth) {
+      if (hasApiKey) {
+        missing.push('CLS_API_KEY (must not contain whitespace or control characters)')
+      } else if (uin !== '') {
         missing.push('CLS_UIN (must be a digits-only string)')
       } else {
-        missing.push('CLS_SECRET_ID + CLS_SECRET_KEY (or CLS_UIN)')
+        missing.push('CLS_API_KEY (or CLS_SECRET_ID + CLS_SECRET_KEY, or CLS_UIN)')
       }
     }
     return { missing }
@@ -158,6 +172,7 @@ export function resolveClsConfig(config: Config): ResolveResult {
   return {
     endpoint,
     topicId,
+    apiKey,
     secretId,
     secretKey,
     uin,

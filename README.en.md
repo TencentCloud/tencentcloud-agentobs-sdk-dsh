@@ -91,11 +91,13 @@ export CLS_ENDPOINT=ap-guangzhou.cls.tencentcs.com
 export CLS_TOPIC_ID=your-topic-id
 export CLS_SERVICE_NAME=dsh-agent
 
-# Authentication (choose one):
-# Option 1 (strong auth): SecretId + SecretKey
-export CLS_SECRET_ID=your-secret-id
-export CLS_SECRET_KEY=your-secret-key
-# Option 2 (authless / weak auth): digits-only UIN
+# Authentication (choose one; if several are set: API Key > SecretId/SecretKey > UIN):
+# Option 1 (API Key):
+export CLS_API_KEY=your-api-key
+# Option 2 (strong auth): SecretId + SecretKey
+# export CLS_SECRET_ID=your-secret-id
+# export CLS_SECRET_KEY=your-secret-key
+# Option 3 (authless / weak auth): digits-only UIN
 # export CLS_UIN=your-uin
 
 dsh --profile web
@@ -110,10 +112,12 @@ Edit `$DSH_HOME/profiles/<profile>/cordis.patch.yml`:
   config:
     endpoint: ap-guangzhou.cls.tencentcs.com
     topicId: your-topic-id
-    # strong auth: SecretId + SecretKey
-    secretId: your-secret-id
-    secretKey: your-secret-key
-    # or authless (weak auth): digits-only UIN (mutually exclusive with SecretId/SecretKey)
+    # API Key auth (highest precedence)
+    apiKey: your-api-key
+    # or strong auth: SecretId + SecretKey
+    # secretId: your-secret-id
+    # secretKey: your-secret-key
+    # or authless (weak auth): digits-only UIN
     # uin: "100000000000"
     serviceName: dsh-agent
     captureContent: true
@@ -142,9 +146,10 @@ Or set `captureContent: false` in the plugin configuration.
 | `enabled` | `true` | Disable collection without uninstalling the plugin |
 | `endpoint` | `CLS_ENDPOINT` | CLS API endpoint |
 | `topicId` | `CLS_TOPIC_ID` | CLS log topic ID |
-| `secretId` | `CLS_SECRET_ID` | Tencent Cloud SecretId (strong auth, mutually exclusive with `uin`) |
-| `secretKey` | `CLS_SECRET_KEY` | Tencent Cloud SecretKey (strong auth, mutually exclusive with `uin`) |
-| `uin` | `CLS_UIN` | Tencent Cloud UIN for authless (weak auth) upload (digits only, mutually exclusive with SecretId/SecretKey) |
+| `apiKey` | `CLS_API_KEY` | CLS API Key. Takes precedence; SecretId/SecretKey and `uin` are ignored when set |
+| `secretId` | `CLS_SECRET_ID` | Tencent Cloud SecretId (strong auth, used when no API Key is set) |
+| `secretKey` | `CLS_SECRET_KEY` | Tencent Cloud SecretKey (strong auth, used when no API Key is set) |
+| `uin` | `CLS_UIN` | Tencent Cloud UIN for authless (weak auth) upload (digits only, used only when neither API Key nor SecretId/SecretKey is set) |
 | `serviceName` | `deepseek-harness` | Service name |
 | `captureContent` | `true` | Capture prompts/responses/tool content (set to `false` to disable) |
 | `contentMaxChars` | `128000` | Maximum characters per content attribute |

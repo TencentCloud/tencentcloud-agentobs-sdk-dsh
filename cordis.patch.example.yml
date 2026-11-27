@@ -6,10 +6,13 @@
   config:
     endpoint: ap-guangzhou.cls.tencentcs.com
     topicId: your-topic-id-here
-    # 强鉴权：secretId + secretKey
-    secretId: your-secret-id-here
-    secretKey: your-secret-key-here
-    # 或免鉴权（弱鉴权）上报：仅提供纯数字 UIN（与 secretId/secretKey 二选一）
+    # 鉴权三选一，同时配置时优先级为 apiKey > secretId/secretKey > uin
+    # API Key 鉴权
+    apiKey: your-api-key-here
+    # 或强鉴权：secretId + secretKey
+    # secretId: your-secret-id-here
+    # secretKey: your-secret-key-here
+    # 或免鉴权（弱鉴权）上报：仅提供纯数字 UIN
     # uin: "100000000000"
 
 # 完整配置（带所有可选项）:
@@ -18,10 +21,10 @@
 #     enabled: true
 #     endpoint: ap-guangzhou.cls.tencentcs.com
 #     topicId: your-topic-id-here
-#     # 强鉴权：secretId + secretKey
+#     # 鉴权三选一，同时配置时优先级为 apiKey > secretId/secretKey > uin
+#     apiKey: your-api-key-here
 #     secretId: your-secret-id-here
 #     secretKey: your-secret-key-here
-#     # 或免鉴权（弱鉴权）上报：仅提供纯数字 UIN（与 secretId/secretKey 二选一）
 #     uin: "100000000000"
 #     serviceName: my-dsh-agent
 #     captureContent: true
